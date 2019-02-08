@@ -1,66 +1,45 @@
-﻿using Google.Apis.Auth.OAuth2;
-using Google.Apis.Drive.v3;
-using Google.Apis.Services;
-using Google.Apis.Util.Store;
+﻿using Google.Apis.Drive.v3;
+using LinMeyer.GoogleDriveSync.Sync;
+using Microsoft.Extensions.Configuration;
+using Newtonsoft.Json;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Threading;
 
 namespace LinMeyer.GoogleDriveSync
 {
     class Program
     {
-        // If modifying these scopes, delete your previously saved credentials
-        // at ~/.credentials/drive-dotnet-quickstart.json
-        static string[] Scopes = { DriveService.Scope.DriveReadonly };
-        static string ApplicationName = "Drive API .NET Quickstart";
+        private static AppSettings _settings;
 
         static void Main(string[] args)
         {
-             UserCredential credential;
+            _settings = GetAppSettings();
 
-            using (var stream = new FileStream("credentials.json", FileMode.Open, FileAccess.Read))
+            var syncer = new Syncronizer(new SyncConfig
             {
-                // The file token.json stores the user's access and refresh tokens, and is created
-                // automatically when the authorization flow completes for the first time.
-                string credPath = "token.json";
-                credential = GoogleWebAuthorizationBroker.AuthorizeAsync(
-                    GoogleClientSecrets.Load(stream).Secrets,
-                    Scopes,
-                    "user",
-                    CancellationToken.None,
-                    new FileDataStore(credPath, true)).Result;
-                Console.WriteLine("Credential file saved to: " + credPath);
-            }
-
-            // Create Drive API service.
-            var service = new DriveService(new BaseClientService.Initializer()
-            {
-                HttpClientInitializer = credential,
-                ApplicationName = ApplicationName,
+                ApplicationName = _settings.GoogleApplicationName,
+                CredentialsPath = _settings.GoogleCredentialsFilePath,
+                GoogleDriveFolder = _settings.GoogleDriveFolder
             });
 
-            // Define parameters of request.
-            FilesResource.ListRequest listRequest = service.Files.List();
-            listRequest.PageSize = 10;
-            listRequest.Fields = "nextPageToken, files(id, name)";
+            syncer.Go();
 
-            // List files.
-            IList<Google.Apis.Drive.v3.Data.File> files = listRequest.Execute().Files;
-            Console.WriteLine("Files:");
-            if (files != null && files.Count > 0)
-            {
-                foreach (var file in files)
-                {
-                    Console.WriteLine("{0} ({1})", file.Name, file.Id);
-                }
-            }
-            else
-            {
-                Console.WriteLine("No files found.");
-            }
-            Console.Read();
+            // Pause app at the end until they close
+            Console.ReadLine();
+        }
+
+        public static AppSettings GetAppSettings()
+        {
+            // Build the config from the appsettings file
+            var configBuilder = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
+            var rootConfig = configBuilder.Build();
+            // Get the AppSettings section
+            var appSettingsSection = rootConfig.GetSection("AppSettings");
+            // Serialize to an object
+            var appSettings = appSettingsSection.Get<AppSettings>();
+            return appSettings;
         }
     }
 }
