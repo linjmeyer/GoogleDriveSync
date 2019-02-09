@@ -14,7 +14,7 @@ namespace LinMeyer.GoogleDriveSync
         /// <summary>
         /// Path of the folder that should be downloaded from Google Drive.  Default is the base directory.
         /// </summary>
-        public string GoogleDriveFolder { get; set; } = string.Empty;
+        public string GoogleDriveFolderId { get; set; }
 
         /// <summary>
         /// The name of your app that will display on the Google Oath2 consent screen
@@ -25,5 +25,6 @@ namespace LinMeyer.GoogleDriveSync
         /// The destination of the files to  be syncronized from Google
         /// </summary>
         public string DestinationPath { get; set; }
+        public bool ForceDownloads { get; set; }
     }
 }

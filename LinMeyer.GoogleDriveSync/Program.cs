@@ -19,11 +19,13 @@ namespace LinMeyer.GoogleDriveSync
             {
                 ApplicationName = _settings.GoogleApplicationName,
                 CredentialsPath = _settings.GoogleCredentialsFilePath,
-                GoogleDriveFolder = _settings.GoogleDriveFolder,
+                GoogleDriveFolderId = _settings.GoogleDriveFolderId,
                 DestinationPath = _settings.DestinationPath,
+                ForceDownloads = _settings.ForceDownloads
             });
 
-            syncer.Go();
+            var go = syncer.Go();
+            go.Wait();
 
             // Pause app at the end until they close
             Console.ReadLine();

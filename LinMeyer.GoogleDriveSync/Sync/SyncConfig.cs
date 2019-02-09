@@ -9,7 +9,8 @@ namespace LinMeyer.GoogleDriveSync.Sync
         public string ApplicationName { get; set; }
         public string CredentialsPath { get; set; }
         public string TokenPath { get; set; } = "token.json";
-        public string GoogleDriveFolder { get; set; }
+        public string GoogleDriveFolderId { get; set; }
         public string DestinationPath { get; set; }
+        public bool ForceDownloads { get; set; } = false;
     }
 }
