@@ -1,4 +1,5 @@
 ﻿using Google.Apis.Auth.OAuth2;
+using Google.Apis.Download;
 using Google.Apis.Drive.v3;
 using Google.Apis.Drive.v3.Data;
 using Google.Apis.Services;
@@ -9,6 +10,10 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Xml;
+// Use Google and System.IO.File's as different class names to avoid need the entire namespace every usage
+using GFile = Google.Apis.Drive.v3.Data.File;
+using LFile = System.IO.File;
 
 namespace LinMeyer.GoogleDriveSync.Sync
 {
@@ -16,10 +21,12 @@ namespace LinMeyer.GoogleDriveSync.Sync
     {
         public SyncConfig Config { get; private set; }
 
-        private Dictionary<string, Google.Apis.Drive.v3.Data.File> _fileCache = new Dictionary<string, Google.Apis.Drive.v3.Data.File>();
+        private Dictionary<string, GFile> _fileCache = new Dictionary<string, GFile>();
+        private List<(GFile, Exception)> _erroredFiles = new List<(GFile, Exception)>();
         private IEnumerable<string> _scopes = new []{ DriveService.Scope.DriveReadonly };
         private UserCredential _credential = null;
         private DriveService _service = null;
+        private string _validDestinationPath;
 
         public Syncronizer(SyncConfig syncConfig)
         {
@@ -30,19 +37,44 @@ namespace LinMeyer.GoogleDriveSync.Sync
         {
             Authorize();
             CreateService();
+            SanatizeDestinationPath();
 
             var totalFiles = 0;
             var filePage = GetNextFilePage();
             while (filePage?.Files != null && filePage.Files.Count > 0)
             {
                 // Loop the files in this page
-                foreach (var file in filePage.Files)
+                foreach (var gFile in filePage.Files)
                 {
                     totalFiles++;
-                    var fullPath = GetFileFolderPath(file);
+                    var fullPath = GetFileFolderPath(gFile);
                     var shouldCopy = IsMatchForGooglePathSync(fullPath);
-                    Console.ForegroundColor = shouldCopy ? ConsoleColor.Green : ConsoleColor.White;
-                    Console.WriteLine($"{totalFiles} - {fullPath} ({file.Id})");
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.WriteLine($"New File #{totalFiles} \"{fullPath}\"");
+                    if (shouldCopy)
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkGreen;
+                        Console.WriteLine("   Should be copied");
+                        var localPath = $"{Config.DestinationPath}\\{fullPath}";
+                        if(LFile.Exists(localPath))
+                        {
+                            Console.WriteLine("   File exists");
+                            var lFileInfo = new FileInfo(localPath);
+                            if(lFileInfo.LastWriteTimeUtc <= (gFile.ModifiedTime ?? gFile.CreatedTime))
+                            {
+                                Console.WriteLine($"   Google file is newer, downloading to: {localPath}");
+                                DownloadFile(gFile, localPath);
+                            }
+                        }
+                        else
+                        {
+                            // File doesn't exist, download it
+                            Console.ForegroundColor = ConsoleColor.Green;
+                            Console.WriteLine($"   File does not exist, downloading to: {localPath}");
+                            DownloadFile(gFile, localPath);
+                        }
+                    }
+                    
                 }
 
                 // Get the next page or stop the loop
@@ -53,6 +85,99 @@ namespace LinMeyer.GoogleDriveSync.Sync
                 else
                 {
                     filePage = GetNextFilePage(filePage.NextPageToken);
+                }
+            }
+        }
+
+        private void SanatizeDestinationPath()
+        {
+            var sanitizedDestination = SanatizePath(Config.DestinationPath);
+            if(sanitizedDestination != Config.DestinationPath)
+            {
+                WriteLineError($"Warning: Invalid Destination path.  Will use \"{sanitizedDestination}\" instead");
+            }
+        }
+
+        private void WriteLineError(string write)
+        {
+            var originalColor = Console.ForegroundColor;
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine(write);
+            Console.ForegroundColor = originalColor;
+        }
+
+        private string SanatizePath(string path)
+        {
+            var invalidChars = Path.GetInvalidPathChars();
+            var onlyValidChars = path.Where(c => !invalidChars.Contains(c)).ToArray();
+            return new string(onlyValidChars);
+        }
+
+        private void DownloadFile(GFile file, string destinationPath)
+        {
+            var sanitizedDestination = SanatizePath(destinationPath);
+            if(sanitizedDestination != destinationPath)
+            {
+                WriteLineError($"Warning: Invalid Destination path.  Will use \"{sanitizedDestination}\" instead");
+            }
+            // Create the directorys (if they dont exist) to avoid exception when making file
+            var folderPath = Path.GetDirectoryName(destinationPath);
+            Directory.CreateDirectory(folderPath);
+            // Create the file in a temp location to avoid overwriting the file and corrupting if the download is broken
+            var tempFile = destinationPath + ".temp";
+            try
+            {
+                using (var stream = new FileStream(tempFile, FileMode.Create))
+                {
+                    var request = _service.Files.Get(file.Id);
+                    // Add a handler which will be notified on progress changes.
+                    // It will notify on each chunk download and when the
+                    // download is completed or failed.
+                    request.MediaDownloader.ProgressChanged +=
+                    (IDownloadProgress progress) =>
+                    {
+                        switch (progress.Status)
+                        {
+                            case DownloadStatus.Downloading:
+                                {
+                                    string percent;
+                                    if (file.Size.HasValue) {
+                                        percent = $"...{((100 * progress.BytesDownloaded) / file.Size.Value)}%";
+                                    }
+                                    else
+                                    {
+                                        percent = "...";
+                                    }
+
+                                    Console.WriteLine("   " + percent);
+                                    break;
+                                }
+                            case DownloadStatus.Completed:
+                                {
+                                    Console.WriteLine("   Download complete.");
+                                    break;
+                                }
+                            case DownloadStatus.Failed:
+                                {
+                                    Console.WriteLine("   Download failed.");
+                                    break;
+                                }
+                        }
+                    };
+                    request.DownloadWithStatus(stream);
+                    stream.Dispose();
+                    // Finished downloading, delete the original and rename the temp to the original
+                    LFile.Delete(destinationPath);
+                    LFile.Move(tempFile, destinationPath);
+                }
+            }
+            catch (Exception exception)
+            {
+                WriteLineError($"Error: {typeof(Exception)} ");
+                WriteLineError(exception.Message);
+                if(file != null)
+                {
+                    _erroredFiles.Add((file, exception));
                 }
             }
         }
@@ -71,7 +196,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
         {
             FilesResource.ListRequest listRequest = _service.Files.List();
             listRequest.PageSize = 50;
-            listRequest.Fields = "nextPageToken, files(id, name, parents)";
+            listRequest.Fields = "nextPageToken, files(id, name, parents, size)";
             listRequest.PageToken = nextToken;
             var listResponse = listRequest.Execute();
             return listResponse;
@@ -97,7 +222,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
             }
         }
 
-        public string GetFileFolderPath(Google.Apis.Drive.v3.Data.File file)
+        public string GetFileFolderPath(GFile file)
         {
             var name = file.Name;
 
@@ -125,7 +250,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
             return path.Aggregate((current, next) => Path.Combine(current, next));
         }
 
-        public Google.Apis.Drive.v3.Data.File GetParent(string id)
+        public GFile GetParent(string id)
         {
             // Parent Files are like folders - most folders have multiple child files
             // This means many parents will be duplicate requests, cache them to avoid redundant API calls to Google

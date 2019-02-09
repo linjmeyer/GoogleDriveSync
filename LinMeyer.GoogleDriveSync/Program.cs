@@ -19,7 +19,8 @@ namespace LinMeyer.GoogleDriveSync
             {
                 ApplicationName = _settings.GoogleApplicationName,
                 CredentialsPath = _settings.GoogleCredentialsFilePath,
-                GoogleDriveFolder = _settings.GoogleDriveFolder
+                GoogleDriveFolder = _settings.GoogleDriveFolder,
+                DestinationPath = _settings.DestinationPath,
             });
 
             syncer.Go();
