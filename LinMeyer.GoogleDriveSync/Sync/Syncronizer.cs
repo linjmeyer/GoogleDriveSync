@@ -37,13 +37,14 @@ namespace LinMeyer.GoogleDriveSync.Sync
             Config = syncConfig;
         }
 
-        public void Go()
+        public async Task Go()
         {
             Authorize();
             CreateService();
             SanatizeDestinationPath();
             FindFilesToSync();
-            SyncFiles();
+
+            await SyncFiles();
         }
 
         private void FindFilesToSync()
@@ -107,7 +108,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
             }
         }
 
-        private void SyncFiles()
+        private async Task SyncFiles()
         {
             Console.WriteLine($"Sync files starting - {_filesToDownload.Count} files to be downloaded");
             if(_filesToDownload.Count <= 0)
@@ -118,13 +119,18 @@ namespace LinMeyer.GoogleDriveSync.Sync
             var page = GetNextDownloadPage();
             while (page.downloads != null && page.downloads.Any())
             {
+                Console.WriteLine();
+                Console.WriteLine("================================================");
+                Console.WriteLine($"Starting download for {page.downloads.Count()} files");
+                var downloaders = new List<Task>();
                 foreach (var download in page.downloads)
                 {
-                    Console.WriteLine();
-                    Console.WriteLine($"Starting download for ${download.Destination}");
-                    DownloadFile(download);
+                    downloaders.Add(Task.Run(() =>
+                    {
+                        DownloadFile(download);
+                    }));
                 }
-
+                await Task.WhenAll(downloaders);
                 page = GetNextDownloadPage(page.nextPage);
             }
         }
@@ -137,14 +143,14 @@ namespace LinMeyer.GoogleDriveSync.Sync
         private (DownloadableFile[] downloads, int nextPage) GetNextDownloadPage(int nextPage)
         {
             var total = _filesToDownload.Count;
-            var pageSize = 5; // We will download 5 files at a time
+            var pageSize = 15; // We will download 15 files at a time
             var skip = pageSize * (nextPage - 1); // Determine how many files to skip to start the next page
             var pages = _filesToDownload
                 .Skip(skip)
                 .Take(pageSize)
                 .ToArray();
 
-            return (pages, nextPage++);
+            return (pages, ++nextPage);
         }
 
         private void SanatizeDestinationPath()
@@ -173,10 +179,11 @@ namespace LinMeyer.GoogleDriveSync.Sync
 
         private void DownloadFile(DownloadableFile download)
         {
+            Console.WriteLine($"[dl: {download.GFile.Name}] download starting at {download.Destination}");
             var sanitizedDestination = SanatizePath(download.Destination);
             if(sanitizedDestination != download.Destination)
             {
-                WriteLineError($"Warning: Invalid Destination path.  Will use \"{sanitizedDestination}\" instead");
+                WriteLineError($"[dl: {download.GFile.Name}] Warning: Invalid Destination path.  Will use \"{sanitizedDestination}\" instead");
             }
             // Create the directorys (if they dont exist) to avoid exception when making file
             var folderPath = Path.GetDirectoryName(sanitizedDestination);
@@ -200,24 +207,24 @@ namespace LinMeyer.GoogleDriveSync.Sync
                                 {
                                     string percent;
                                     if (download.GFile.Size.HasValue) {
-                                        percent = $"...{((100 * progress.BytesDownloaded) / download.GFile.Size.Value)}%";
+                                        percent = $"{((100 * progress.BytesDownloaded) / download.GFile.Size.Value)}%";
                                     }
                                     else
                                     {
                                         percent = "...";
                                     }
 
-                                    Console.WriteLine("   " + percent);
+                                    Console.WriteLine($"[dl: {download.GFile.Name}] {percent}");
                                     break;
                                 }
                             case DownloadStatus.Completed:
                                 {
-                                    Console.WriteLine("   Download complete.");
+                                    Console.WriteLine($"[dl: {download.GFile.Name}] Download complete.");
                                     break;
                                 }
                             case DownloadStatus.Failed:
                                 {
-                                    Console.WriteLine("   Download failed.");
+                                    WriteLineError($"[dl: {download.GFile.Name}] Download failed.  Exception: {progress.Exception}");
                                     break;
                                 }
                         }
