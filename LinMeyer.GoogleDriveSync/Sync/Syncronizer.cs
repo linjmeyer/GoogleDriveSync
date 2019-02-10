@@ -25,8 +25,8 @@ namespace LinMeyer.GoogleDriveSync.Sync
 
         private Dictionary<string, GFile> _fileCache = new Dictionary<string, GFile>();
         private List<DownloadableFile> _filesToDownload = new List<DownloadableFile>();
-        private List<(GFile, Exception)> _erroredFiles = new List<(GFile, Exception)>();
-        private List<string> _successfulDownloads = new List<string>();
+        //private List<ErroredFile> _erroredFiles = new List<ErroredFile>();
+        //private List<string> _successfulDownloads = new List<string>();
         private IEnumerable<string> _scopes = new []{ DriveService.Scope.DriveReadonly };
         private UserCredential _credential = null;
         private DriveService _service = null;
@@ -42,13 +42,18 @@ namespace LinMeyer.GoogleDriveSync.Sync
             Authorize();
             CreateService();
             SanatizeDestinationPath();
-            FindFilesToSync();
-
-            await SyncFiles();
+            // Start finding files to sync and track progress
+            var resultsBuilder = FindFilesToSync();
+            var results = await SyncFiles(resultsBuilder);
+            // Once finished display a summary of the results
+            DisplayResults(results);
         }
 
-        private void FindFilesToSync()
+        private SyncResultsBuilder FindFilesToSync()
         {
+            // Track any errors in results
+            var results = new SyncResultsBuilder();
+
             Console.WriteLine($"Finding files in folder with id {Config.GoogleDriveFolderId}");
             var totalFiles = 0;
             var filePage = GetNextGoogleFilePage();
@@ -57,14 +62,17 @@ namespace LinMeyer.GoogleDriveSync.Sync
                 // Loop the files in this page
                 foreach (var gFile in filePage.Files)
                 {
+                    totalFiles++;
+                    var fullPath = GetFileFolderPath(gFile);
+
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.WriteLine($"New File #{totalFiles} \"{fullPath}\"");
+
+                    var localPath = $"{Config.DestinationPath}\\{fullPath}";
+                    var downloadFile = new DownloadableFile(gFile, localPath);
+
                     try
                     {
-                        totalFiles++;
-                        var fullPath = GetFileFolderPath(gFile);
-                        Console.ForegroundColor = ConsoleColor.White;
-                        Console.WriteLine($"New File #{totalFiles} \"{fullPath}\"");
-                        var localPath = $"{Config.DestinationPath}\\{fullPath}";
-                        var downloadFile = new DownloadableFile(gFile, localPath);
                         if (LFile.Exists(localPath))
                         {
                             Console.WriteLine("   File exists");
@@ -92,7 +100,8 @@ namespace LinMeyer.GoogleDriveSync.Sync
                     }
                     catch (Exception exception)
                     {
-                        _erroredFiles.Add((gFile, exception));
+                        var error = downloadFile.ToErroredFile(exception);
+                        results.ErroredFiles.Add(error);
                     }
                 }
 
@@ -106,15 +115,14 @@ namespace LinMeyer.GoogleDriveSync.Sync
                     filePage = GetNextGoogleFilePage(filePage.NextPageToken);
                 }
             }
+
+            return results;
         }
 
-        private async Task SyncFiles()
+        private async Task<SyncResults> SyncFiles(SyncResultsBuilder resultsBuilder)
         {
             Console.WriteLine($"Sync files starting - {_filesToDownload.Count} files to be downloaded");
-            if(_filesToDownload.Count <= 0)
-            {
-                return;
-            }
+
             // To increase the download speed we will download multiple files at once in pages
             var page = GetNextDownloadPage();
             while (page.downloads != null && page.downloads.Any())
@@ -127,11 +135,37 @@ namespace LinMeyer.GoogleDriveSync.Sync
                 {
                     downloaders.Add(Task.Run(() =>
                     {
-                        DownloadFile(download);
+                        DownloadFile(download, resultsBuilder);
                     }));
                 }
                 await Task.WhenAll(downloaders);
                 page = GetNextDownloadPage(page.nextPage);
+            }
+
+            return resultsBuilder.Build();
+        }
+
+        private void DisplayResults(SyncResults results)
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine();
+            Console.WriteLine("Results");
+            Console.WriteLine("==================================================");
+            Console.WriteLine($"Total Downloads:        {results.TotalDownloads}");
+            Console.WriteLine($"Successful Downloads:   {results.SuccessfulDownloads.Count}");
+            Console.WriteLine($"Errored Downloads       {results.ErroredFiles.Count}");
+            Console.WriteLine();
+
+            if (key.Trim() == "1")
+            {
+                foreach (var errors in results.ErroredFiles)
+                {
+                    Console.WriteLine("Error ---------------------");
+                    Console.WriteLine($"     - {errors.File.GFile.Name}");
+                    Console.WriteLine($"     - {errors.File.Destination}");
+                    Console.WriteLine($"     - {errors.ErrorMessage}");
+                    Console.WriteLine();
+                }
             }
         }
 
@@ -143,7 +177,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
         private (DownloadableFile[] downloads, int nextPage) GetNextDownloadPage(int nextPage)
         {
             var total = _filesToDownload.Count;
-            var pageSize = 15; // We will download 15 files at a time
+            var pageSize = 5;
             var skip = pageSize * (nextPage - 1); // Determine how many files to skip to start the next page
             var pages = _filesToDownload
                 .Skip(skip)
@@ -177,7 +211,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
             return new string(onlyValidChars);
         }
 
-        private void DownloadFile(DownloadableFile download)
+        private void DownloadFile(DownloadableFile download, SyncResultsBuilder results)
         {
             Console.WriteLine($"[dl: {download.GFile.Name}] download starting at {download.Destination}");
             var sanitizedDestination = SanatizePath(download.Destination);
@@ -220,11 +254,13 @@ namespace LinMeyer.GoogleDriveSync.Sync
                             case DownloadStatus.Completed:
                                 {
                                     Console.WriteLine($"[dl: {download.GFile.Name}] Download complete.");
+                                    results.SuccessfulDownloads.Add(download);
                                     break;
                                 }
                             case DownloadStatus.Failed:
                                 {
                                     WriteLineError($"[dl: {download.GFile.Name}] Download failed.  Exception: {progress.Exception}");
+                                    results.ErroredFiles.Add(download.ToErroredFile(progress.Exception));
                                     break;
                                 }
                         }
@@ -242,7 +278,8 @@ namespace LinMeyer.GoogleDriveSync.Sync
                 WriteLineError(exception.Message);
                 if(download?.GFile != null)
                 {
-                    _erroredFiles.Add((download.GFile, exception));
+                    var errorFile = download.ToErroredFile(exception);
+                    results.ErroredFiles.Add(errorFile);
                 }
             }
         }
