@@ -249,7 +249,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
                                 }
                             case DownloadStatus.Failed:
                                 {
-                                    _logger.LogError($"[dl: {download.GFile.Name}] Download failed.  Exception: {progress.Exception}");
+                                    _logger.LogError($"[dl: {download.GFile.Name}] Download failed.  Exception: {progress.Exception.Message}");
                                     results.ErroredFiles.Add(download.ToErroredFile(progress.Exception));
                                     break;
                                 }
@@ -264,7 +264,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
             }
             catch (Exception exception)
             {
-                _logger.LogError($"Error: {typeof(Exception)} ");
+                _logger.LogError($"[dl: {download?.GFile?.Name}] Download failed.  Exception: {exception.Message}");
                 _logger.LogError(exception.Message);
                 if(download?.GFile != null)
                 {
