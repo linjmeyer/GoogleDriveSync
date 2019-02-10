@@ -1,0 +1,14 @@
+{
+  "AppSettings": {
+    "SyncConfig": {
+      "ApplicationName": "Lin Google Drive Sync",
+      "GoogleDriveFolderId": "1asdfTpkg4WbL6WmSeasdfklutMj9mz3irIasdfasdfHqbOhOY",
+      "GoogleApplicationName": "Lin's Google Drive Syncer",
+      "DestinationPath": "c:\users\you\your stuff\",
+      "ForceDownloads": false,
+      "IncludeTopDriveFolder": false,
+      "CredentialsPath": "credentials.json"
+    }
+  }
+}
+
