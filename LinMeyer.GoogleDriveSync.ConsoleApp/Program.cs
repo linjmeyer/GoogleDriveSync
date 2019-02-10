@@ -1,19 +1,41 @@
 ﻿using LinMeyer.GoogleDriveSync.Sync;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Serilog;
 using System;
 using System.IO;
+
 
 namespace LinMeyer.GoogleDriveSync.ConsoleApp
 {
     class Program
     {
         private static AppSettings _settings;
+        private static IServiceProvider _services;
 
         static void Main(string[] args)
         {
+            // Set up app settings
             _settings = GetAppSettings();
 
-            var syncer = new Syncronizer(new SyncConfig
+            // Configure Serilog
+            Log.Logger = new LoggerConfiguration()
+                // File logging will be one log file per day, 1 month of logs kept (default), and only errors will be logged
+                .WriteTo.File("log-.txt", rollingInterval: RollingInterval.Day, restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Error)
+                // Console logging use the default params which will show anything logged, including INFO
+                .WriteTo.ColoredConsole()
+                .CreateLogger();
+
+            // Use .NET Core DI to add Serilog to the standard Microsoft...ILogger interface
+            ConfigureServices(new ServiceCollection());
+
+            StartSync();
+        }
+
+        private static void ConfigureServices(IServiceCollection serviceCollection)
+        {
+            // Add static for SyncConfig which tells the Syncronizer class how to function
+            serviceCollection.AddSingleton(new SyncConfig
             {
                 ApplicationName = _settings.GoogleApplicationName,
                 CredentialsPath = _settings.GoogleCredentialsFilePath,
@@ -21,12 +43,13 @@ namespace LinMeyer.GoogleDriveSync.ConsoleApp
                 DestinationPath = _settings.DestinationPath,
                 ForceDownloads = _settings.ForceDownloads
             });
+            serviceCollection.AddTransient<Syncronizer>();
 
-            var go = syncer.Go();
-            go.Wait();
+            // Add Serilog to DI so we can use the standard .NET Core ILogger
+            serviceCollection.AddLogging(configure => configure.AddSerilog());
 
-            // Pause app at the end until they close
-            Console.ReadLine();
+            // Build service provider
+            _services = serviceCollection.BuildServiceProvider();
         }
 
         public static AppSettings GetAppSettings()
@@ -41,6 +64,15 @@ namespace LinMeyer.GoogleDriveSync.ConsoleApp
             // Serialize to an object
             var appSettings = appSettingsSection.Get<AppSettings>();
             return appSettings;
+        }
+
+        private static void StartSync()
+        {
+            // Use DI to get the Syncronizer using injected settings and logging
+            var sync = _services.GetRequiredService<Syncronizer>();
+            sync.Go().Wait();
+            // Pause app at the end until they close
+            Console.ReadLine();
         }
     }
 }
