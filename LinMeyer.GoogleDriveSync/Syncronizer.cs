@@ -34,8 +34,11 @@ namespace LinMeyer.GoogleDriveSync.Sync
 
         public Syncronizer(SyncConfig syncConfig, ILogger<Syncronizer> logger)
         {
-            Config = syncConfig;
-            _logger = logger;
+            Config = syncConfig ?? throw new InvalidOperationException($"{nameof(syncConfig)} cannot be null when creating a new {nameof(Syncronizer)} instance");
+            _logger = logger ?? _logger; // Use a logger if they passed it, otherwise stick to the default if it's null
+
+            // Validate the config object
+            Config.Validate();
         }
 
         public async Task Go()
@@ -70,7 +73,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
 
                     _logger.LogInformation($"New File #{totalFiles} \"{fullPath}\"");
 
-                    var localPath = $"{Config.DestinationPath}\\{fullPath}";
+                    var localPath = Path.Combine(Config.DestinationPath, fullPath);
                     var downloadFile = new DownloadableFile(gFile, localPath);
 
                     try
@@ -320,6 +323,13 @@ namespace LinMeyer.GoogleDriveSync.Sync
             {
                 var parent = GetParent(file.Parents[0]);
 
+
+                // Break when we get to the top level folder in the sync and include top drive is false
+                if (parent.Id == Config.GoogleDriveFolderId && !Config.IncludeTopDriveFolder)
+                {
+                    break;
+                }
+
                 // Stop when we find the root dir
                 if (parent.Parents == null || parent.Parents.Count() == 0)
                 {
@@ -330,7 +340,8 @@ namespace LinMeyer.GoogleDriveSync.Sync
                 file = parent;
             }
             path.Add(name);
-            return path.Aggregate((current, next) => Path.Combine(current, next));
+            var fullPath = path.Aggregate((current, next) => Path.Combine(current, next));
+            return fullPath;
         }
 
         public GFile GetParent(string id)
@@ -344,7 +355,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
 
             // New file, get it from Google Drive
             var request = _service.Files.Get(id);
-            request.Fields = "name,parents";
+            request.Fields = "name,parents,id";
             var parent = request.Execute();
 
             // Cache file for re-use

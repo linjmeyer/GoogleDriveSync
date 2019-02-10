@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using System;
+using System.ComponentModel.DataAnnotations;
 using System.IO;
 
 
@@ -35,14 +36,7 @@ namespace LinMeyer.GoogleDriveSync.ConsoleApp
         private static void ConfigureServices(IServiceCollection serviceCollection)
         {
             // Add static for SyncConfig which tells the Syncronizer class how to function
-            serviceCollection.AddSingleton(new SyncConfig
-            {
-                ApplicationName = _settings.GoogleApplicationName,
-                CredentialsPath = _settings.GoogleCredentialsFilePath,
-                GoogleDriveFolderId = _settings.GoogleDriveFolderId,
-                DestinationPath = _settings.DestinationPath,
-                ForceDownloads = _settings.ForceDownloads
-            });
+            serviceCollection.AddSingleton(_settings.SyncConfig);
             serviceCollection.AddTransient<Syncronizer>();
 
             // Add Serilog to DI so we can use the standard .NET Core ILogger
@@ -63,6 +57,8 @@ namespace LinMeyer.GoogleDriveSync.ConsoleApp
             var appSettingsSection = rootConfig.GetSection("AppSettings");
             // Serialize to an object
             var appSettings = appSettingsSection.Get<AppSettings>();
+            // Validate app settings
+            Validator.ValidateObject(appSettings, new ValidationContext(appSettings), true);
             return appSettings;
         }
 
