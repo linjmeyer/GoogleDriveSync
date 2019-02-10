@@ -48,65 +48,41 @@ namespace LinMeyer.GoogleDriveSync.Sync
             CreateService();
             SanatizeDestinationPath();
             // Start finding files to sync and track progress
-            var resultsBuilder = FindFilesToSync();
+            // First call to FindFilesToSync should include the top level folder Id from config
+
+            var resultsBuilder = new SyncResultsBuilder();
+            FindFilesToSync(resultsBuilder, Config.GoogleDriveFolderId);
             var results = await SyncFiles(resultsBuilder);
             // Once finished display a summary of the results
             EndTime = DateTime.Now;
             DisplayResults(results);
         }
 
-        private SyncResultsBuilder FindFilesToSync()
+        private void FindFilesToSync(SyncResultsBuilder results, string folderId)
         {
-            // Track any errors in results
-            var results = new SyncResultsBuilder();
+            if (string.IsNullOrWhiteSpace(folderId))
+            {
+                return;
+            }
 
-            _logger.LogInformation($"Finding files in folder with id {Config.GoogleDriveFolderId}");
-            var totalFiles = 0;
-            var filePage = GetNextGoogleFilePage();
+            _logger.LogInformation($"Finding files in folder with id {folderId}");
+            var filePage = GetNextGoogleFilePage(folderId, null);
             while (filePage?.Files != null && filePage.Files.Count > 0)
             {
                 // Loop the files in this page
                 foreach (var gFile in filePage.Files)
                 {
-                    totalFiles++;
-                    var fullPath = GetFileFolderPath(gFile);
-
-                    _logger.LogInformation($"New File #{totalFiles} \"{fullPath}\"");
-
-                    var localPath = Path.Combine(Config.DestinationPath, fullPath);
-                    var downloadFile = new DownloadableFile(gFile, localPath);
-
-                    try
+                    // If this is a folder ignore it as we can't "sync" a folder (but it will be created later when we get the full path)
+                    // save it to the file cache for reference later when getting parent path
+                    if(gFile.MimeType == SyncConstants.FolderMimeType)
                     {
-                        if (LFile.Exists(localPath))
-                        {
-                            _logger.LogInformation("   File exists");
-                            if (Config.ForceDownloads)
-                            {
-                                _logger.LogInformation($"   Force downloads enabled, will download to: {localPath}");
-                                _filesToDownload.Add(downloadFile);
-                                continue;
-                            }
-
-                            var lFileInfo = new FileInfo(localPath);
-                            if (lFileInfo.LastWriteTimeUtc <= (gFile.ModifiedTime ?? gFile.CreatedTime))
-                            {
-                                _logger.LogInformation($"   Google file is newer, will download to: {localPath}");
-                                _filesToDownload.Add(downloadFile);
-                            }
-                        }
-                        else
-                        {
-                            // File doesn't exist, download it
-                            _logger.LogInformation($"   File does not exist, downloading to: {localPath}");
-                            _filesToDownload.Add(downloadFile);
-                        }
+                        _fileCache.TryAdd(gFile.Id, gFile);
+                        // Recusrively call FileFilesToSync agains the folder we just found to get the files in this folder
+                        FindFilesToSync(results, gFile.Id);
+                        continue;
                     }
-                    catch (Exception exception)
-                    {
-                        var error = downloadFile.ToErroredFile(exception);
-                        results.ErroredFiles.Add(error);
-                    }
+                    // Non-folder files should be checked against the local destination for downloading
+                    CheckForLocalFile(gFile, results);
                 }
 
                 // Get the next page or stop the loop
@@ -116,11 +92,51 @@ namespace LinMeyer.GoogleDriveSync.Sync
                 }
                 else
                 {
-                    filePage = GetNextGoogleFilePage(filePage.NextPageToken);
+                    filePage = GetNextGoogleFilePage(folderId, filePage.NextPageToken);
                 }
             }
+        }
 
-            return results;
+        private void CheckForLocalFile(GFile gFile, SyncResultsBuilder results)
+        {
+            var fullPath = GetFileFolderPath(gFile);
+
+            _logger.LogInformation($"New File \"{fullPath}\"");
+
+            var localPath = Path.Combine(Config.DestinationPath, fullPath);
+            var downloadFile = new DownloadableFile(gFile, localPath);
+
+            try
+            {
+                if (LFile.Exists(localPath))
+                {
+                    _logger.LogInformation("   File exists");
+                    if (Config.ForceDownloads)
+                    {
+                        _logger.LogInformation($"   Force downloads enabled, will download to: {localPath}");
+                        _filesToDownload.Add(downloadFile);
+                        return;
+                    }
+
+                    var lFileInfo = new FileInfo(localPath);
+                    if (lFileInfo.LastWriteTimeUtc <= (gFile.ModifiedTime ?? gFile.CreatedTime))
+                    {
+                        _logger.LogInformation($"   Google file is newer, will download to: {localPath}");
+                        _filesToDownload.Add(downloadFile);
+                    }
+                }
+                else
+                {
+                    // File doesn't exist, download it
+                    _logger.LogInformation($"   File does not exist, downloading to: {localPath}");
+                    _filesToDownload.Add(downloadFile);
+                }
+            }
+            catch (Exception exception)
+            {
+                var error = downloadFile.ToErroredFile(exception);
+                results.ErroredFiles.Add(error);
+            }
         }
 
         private async Task<SyncResults> SyncFiles(SyncResultsBuilder resultsBuilder)
@@ -277,12 +293,12 @@ namespace LinMeyer.GoogleDriveSync.Sync
             }
         }
 
-        private FileList GetNextGoogleFilePage(string nextToken = null)
+        private FileList GetNextGoogleFilePage(string folderId, string nextToken)
         {
             FilesResource.ListRequest listRequest = _service.Files.List();
             listRequest.PageSize = 50;
-            listRequest.Fields = $"nextPageToken, files(id, name, parents, size)";
-            listRequest.Q = $"'{Config.GoogleDriveFolderId}' in parents"; // Only get files where one of the parentId's matches the folder Id we want
+            listRequest.Fields = $"nextPageToken, files(id, name, parents, size, mimeType)";
+            listRequest.Q = $"'{folderId}' in parents"; // Only get files where one of the parentId's matches the folder Id we want
             listRequest.PageToken = nextToken;
             var listResponse = listRequest.Execute();
             return listResponse;
@@ -359,7 +375,7 @@ namespace LinMeyer.GoogleDriveSync.Sync
             var parent = request.Execute();
 
             // Cache file for re-use
-            _fileCache.Add(id, parent);
+            _fileCache.TryAdd(id, parent);
 
             return parent;
         }

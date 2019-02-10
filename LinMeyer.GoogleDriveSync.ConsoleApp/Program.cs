@@ -67,8 +67,6 @@ namespace LinMeyer.GoogleDriveSync.ConsoleApp
             // Use DI to get the Syncronizer using injected settings and logging
             var sync = _services.GetRequiredService<Syncronizer>();
             sync.Go().Wait();
-            // Pause app at the end until they close
-            Console.ReadLine();
         }
     }
 }
