@@ -1,11 +1,9 @@
-﻿using Google.Apis.Drive.v3;
-using LinMeyer.GoogleDriveSync.Sync;
+﻿using LinMeyer.GoogleDriveSync.Sync;
 using Microsoft.Extensions.Configuration;
-using Newtonsoft.Json;
 using System;
 using System.IO;
 
-namespace LinMeyer.GoogleDriveSync
+namespace LinMeyer.GoogleDriveSync.ConsoleApp
 {
     class Program
     {

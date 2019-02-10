@@ -156,16 +156,13 @@ namespace LinMeyer.GoogleDriveSync.Sync
             Console.WriteLine($"Errored Downloads       {results.ErroredFiles.Count}");
             Console.WriteLine();
 
-            if (key.Trim() == "1")
+            foreach (var errors in results.ErroredFiles)
             {
-                foreach (var errors in results.ErroredFiles)
-                {
-                    Console.WriteLine("Error ---------------------");
-                    Console.WriteLine($"     - {errors.File.GFile.Name}");
-                    Console.WriteLine($"     - {errors.File.Destination}");
-                    Console.WriteLine($"     - {errors.ErrorMessage}");
-                    Console.WriteLine();
-                }
+                Console.WriteLine("Error ---------------------");
+                Console.WriteLine($"     - {errors.File.GFile.Name}");
+                Console.WriteLine($"     - {errors.File.Destination}");
+                Console.WriteLine($"     - {errors.ErrorMessage}");
+                Console.WriteLine();
             }
         }
 
