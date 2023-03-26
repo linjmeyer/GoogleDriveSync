@@ -1,4 +1,10 @@
-﻿# GoogleDriveSync
+# Not Maintained
+
+I created this mainly to backup Google Photos, but they are no longer synced to Google Drive.  Instead you must use the Google Photos API.  
+
+You can check out this tool if that is your use case as well: [LinMeyer.GooglePhotosBackup](https://github.com/linjmeyer/GooglePhotosBackup)
+
+# GoogleDriveSync
 A basic .NET Core app for downloading data from Google Drive onto a local disk.  The "sync" is only one direction - download from Google to a local or network path.
 
 # Why
